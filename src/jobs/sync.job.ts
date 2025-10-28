@@ -60,7 +60,7 @@ export const startSyncJob = () => {
   console.log('[BFF] Sync job configured to run every 5 minutes.');
   
   // Runs every 5 minutes
-  cron.schedule('*/5 * * * *', () => {
+  cron.schedule('0 3 * * *', () => { 
     syncArticles();
   });
 

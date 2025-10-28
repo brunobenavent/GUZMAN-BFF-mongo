@@ -1,29 +1,52 @@
+// src/models/Article.model.ts
 import { Schema, model } from 'mongoose';
 import { ArticleDTO } from '../mappers/article.mapper';
 
-// El esquema de Mongoose debe coincidir con nuestro DTO limpio
+// El esquema ahora incluye imagenUrl
 const articleSchema = new Schema<ArticleDTO>({
-  id: { type: String, required: true, unique: true, index: true },
-  nombre: { type: String, required: true },
-  descripcion: { type: String },
-  precio: { type: Number, required: true },
+  codigoGuzman: { type: String, required: true, unique: true, index: true },
+  EAN13: { type: String, index: true },
+  nombreCientifico: { type: String, required: true },
+  familia: { type: String, index: true },
+  PVP: { type: Number, required: true },
   maceta: { type: String },
+  calibre: { type: String },
   altura: { type: String },
+  presentacion: { type: String },
+  unidadesPorCarro: { type: Number, default: 0 },
+  unidadesPorTabla: { type: Number, default: 0 },
+  unidadesPorCaja: { type: Number, default: 0 },
+  acabado: { type: String },
+  tamano: { type: String },
+  nombreComun: { type: String },
+  precio2: { type: Number, default: 0 },
+  precio3: { type: Number, default: 0 },
+  // *** NUEVO CAMPO AÑADIDO ***
+  imagenUrl: { type: String }, // Guardamos la URL calculada
+  // *** FIN NUEVO CAMPO ***
   ofertas: {
-    nuevoEspacio: { type: Boolean },
-    euroPlanta: { type: Boolean },
-    cortijo: { type: Boolean },
-    finca: { type: Boolean },
-    arroyo: { type: Boolean },
-    gamera: { type: Boolean },
-    garden: { type: Boolean },
-    marbella: { type: Boolean },
-    estacion: { type: Boolean },
+    nuevoEspacio: { type: Boolean, default: false },
+    euroPlanta: { type: Boolean, default: false },
+    cortijo: { type: Boolean, default: false },
+    finca: { type: Boolean, default: false },
+    arroyo: { type: Boolean, default: false },
+    gamera: { type: Boolean, default: false },
+    garden: { type: Boolean, default: false },
+    marbella: { type: Boolean, default: false },
+    estacion: { type: Boolean, default: false },
   }
+}, {
+  timestamps: true
 });
 
-// ¡Importante! Creamos un índice de texto para poder buscar
-articleSchema.index({ nombre: 'text', descripcion: 'text', id: 'text' });
+// Índice de texto (puedes añadir más campos si buscas por ellos)
+articleSchema.index({
+    nombreCientifico: 'text',
+    nombreComun: 'text',
+    codigoGuzman: 'text',
+    EAN13: 'text',
+    familia: 'text'
+});
 
 const Article = model<ArticleDTO>('Article', articleSchema);
 
