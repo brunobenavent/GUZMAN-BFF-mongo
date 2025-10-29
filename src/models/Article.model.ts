@@ -1,8 +1,8 @@
 // src/models/Article.model.ts
 import { Schema, model } from 'mongoose';
-import { ArticleDTO } from '../mappers/article.mapper';
+import { ArticleDTO } from '../mappers/article.mapper'; // Importa el tipo DTO completo
 
-// El esquema ahora incluye imagenUrl
+// El esquema usa ArticleDTO como tipo base, pero solo define los campos a guardar
 const articleSchema = new Schema<ArticleDTO>({
   codigoGuzman: { type: String, required: true, unique: true, index: true },
   EAN13: { type: String, index: true },
@@ -21,9 +21,7 @@ const articleSchema = new Schema<ArticleDTO>({
   nombreComun: { type: String },
   precio2: { type: Number, default: 0 },
   precio3: { type: Number, default: 0 },
-  // *** NUEVO CAMPO AÑADIDO ***
-  imagenUrl: { type: String }, // Guardamos la URL calculada
-  // *** FIN NUEVO CAMPO ***
+  imagenUrl: { type: String, default: '' }, // <- Solo definimos imagenUrl
   ofertas: {
     nuevoEspacio: { type: Boolean, default: false },
     euroPlanta: { type: Boolean, default: false },
@@ -35,11 +33,12 @@ const articleSchema = new Schema<ArticleDTO>({
     marbella: { type: Boolean, default: false },
     estacion: { type: Boolean, default: false },
   }
+  // No definimos 'imagenUrlOriginal' aquí, Mongoose lo ignorará al guardar
 }, {
-  timestamps: true
+  timestamps: true // Añade createdAt y updatedAt
 });
 
-// Índice de texto (puedes añadir más campos si buscas por ellos)
+// Índice de texto para búsqueda
 articleSchema.index({
     nombreCientifico: 'text',
     nombreComun: 'text',
@@ -48,6 +47,7 @@ articleSchema.index({
     familia: 'text'
 });
 
+// El modelo usa ArticleDTO para el tipado, Mongoose usa el schema definido arriba
 const Article = model<ArticleDTO>('Article', articleSchema);
 
 export default Article;
