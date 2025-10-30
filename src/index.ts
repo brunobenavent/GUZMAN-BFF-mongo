@@ -1,19 +1,22 @@
+// src/index.ts
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import 'dotenv/config';
 import apiRoutes from './routes';
-import { connectDB } from './db'; // Importa la conexión a BBDD
-import { startSyncJob } from './jobs/sync.job'; // Importa el worker
+import { connectDB } from './db';
+import { startSyncJob } from './jobs/sync.job';
+import { createInitialAdmin } from './controllers/auth.controller';
 import rateLimit from 'express-rate-limit';
 
+// --- 1. Definiciones de 'app' y 'PORT' ---
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 4001; // Asegúrate de usar el puerto correcto
 
 // --- Middlewares ---
-app.use(express.json());
+app.use(express.json()); // Para parsear JSON
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200, // Podemos permitir más, las consultas a Mongo son baratas
+  max: 200,
   message: 'Demasiadas peticiones desde esta IP.',
 }));
 app.use(cors({ origin: process.env.FRONTEND_URL }));
@@ -33,14 +36,11 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // --- Función de Arranque ---
 const startServer = async () => {
   try {
-    // 1. Conecta a la BBDD
     await connectDB();
-    
-    // 2. Arranca el Job de Sincronización
-    // (Se ejecutará 1 vez al inicio y luego cada 5 min)
+    await createInitialAdmin();
     startSyncJob();
 
-    // 3. Arranca el servidor web
+    // --- 2. 'app' y 'PORT' se usan aquí ---
     app.listen(PORT, () => {
       console.log(`[BFF] Servidor V2 (MongoDB) corriendo en http://localhost:${PORT}`);
     });

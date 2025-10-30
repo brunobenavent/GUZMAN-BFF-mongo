@@ -2,33 +2,51 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { articleController } from '../controllers/article.controller';
-import { isAdmin } from '../middleware/auth.middleware'; // Asegúrate de tener este archivo o comenta la línea
+import { authController } from '../controllers/auth.controller';
+// 1. Importar los 3 middlewares
+import { authenticate, authorize, tryAuthenticate } from '../middleware/auth.middleware'; 
 
 const router = Router();
-
-// Configuración de Multer
 const storage = multer.memoryStorage();
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // Límite de 10MB
-});
+const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-// --- Rutas ---
-router.get('/status', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
-});
+// --- Rutas Públicas (Sin Auth) ---
+router.get('/status', (req, res) => res.json({ status: 'ok' }));
+router.post('/auth/login', authController.login);
 
-// Esta es la línea 17 que fallaba. Ahora 'articleController.getAll' debería estar definido.
-router.get('/articulos', articleController.getAll); 
+// --- Rutas de Artículos (CON AUTENTICACIÓN OPCIONAL) ---
+// 2. Cambiamos 'authenticate' por 'tryAuthenticate'
+router.get('/articulos', 
+    tryAuthenticate, // <-- CAMBIO AQUÍ
+    articleController.getAll
+);
+router.get('/articulos/:codigoGuzman', 
+    tryAuthenticate, // <-- CAMBIO AQUÍ
+    articleController.getByCodigo
+);
 
-router.get('/articulos/:codigoGuzman', articleController.getByCodigo);
+// --- Rutas de Administración (CON AUTENTICACIÓN ESTRICTA) ---
+const isComercial = authorize(['comercial']);
+const canEditImage = authorize(['comercial', 'trabajador']);
 
-// Ruta protegida para actualizar imagen
+router.post(
+    '/auth/register',
+    authenticate, // <-- ESTRICTO
+    isComercial,
+    authController.register
+);
+router.put(
+    '/articulos/:codigoGuzman',
+    authenticate, // <-- ESTRICTO
+    isComercial,
+    articleController.updateArticle
+);
 router.put(
     '/articulos/:codigoGuzman/imagen',
-    // isAdmin, // Comenta esta línea si aún no has creado el middleware 'auth.middleware.ts'
+    authenticate, // <-- ESTRICTO
+    canEditImage,
     upload.single('imagen'),
     articleController.updateImage
 );
 
-export default router; 
+export default router;

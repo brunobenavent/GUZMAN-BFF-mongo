@@ -1,75 +1,58 @@
 // src/services/dantia.service.ts
-
 import apiClient from './apiClient';
 import { z } from 'zod';
 import { articleDTOSchema, ArticleDTO } from '../mappers/article.mapper';
 import axios from 'axios';
-import { ensureValidSession } from './auth.service'; // <-- 1. IMPORTA ensureValidSession AQUÍ
+// ¡YA NO importamos 'ensureValidSession' desde aquí!
 
-// Estructura de respuesta de la API de Dantia
-interface ApiResponse {
-  $resources: any[]; // 'any' porque Zod validará
-  $itemsPerPage: number;
-}
-
-const PAGE_LIMIT = 100; // Artículos por página pedidos a Dantia
-
-// *** LÍMITE DE SEGURIDAD ***
+// ... (Interface ApiResponse, PAGE_LIMIT, MAX_PAGES_TO_FETCH) ...
+interface ApiResponse { $resources: any[]; $itemsPerPage: number; }
+const PAGE_LIMIT = 100;
 const MAX_PAGES_TO_FETCH = 25; 
 
 export const dantiaService = {
 
   fetchAllArticles: async (): Promise<ArticleDTO[]> => {
     let allCleanArticles: ArticleDTO[] = [];
-    let currentPage = 1; // Empezar en la página 1
+    let currentPage = 1;
     let hasNextPage = true;
     let totalRawFetched = 0;
 
     console.log('[DantiaService-V2] Iniciando descarga completa usando PAGE/COUNT...');
 
+    // ¡ELIMINAMOS la llamada a ensureValidSession() de aquí!
+    // El interceptor de apiClient lo manejará.
 
-
-    // 1. **CRÍTICO:** Construir la cláusula WHERE *una vez* y correctamente.
+    // 1. Construir la cláusula WHERE
     const whereOffers = [
       '_OfertaNuevoEspacio=-1', '_OfertaEuroPlanta=-1', '_OfertaCortijo=-1',
       '_OfertaFinca=-1', '_OfertaArroyo=-1', '_OfertaGamera=-1',
       '_OfertaGarden=-1', '_OfertaMarbella=-1', '_OfertaEstacion=-1'
-      // Añade más condiciones de oferta si es necesario
     ].join(' or ');
     
-    // Asegurarse de que whereOffers no esté vacío
     if (!whereOffers) {
-        console.error("[DantiaService-V2] Error: El array whereOffers está vacío. Abortando.");
+        console.error("[DantiaService-V2] Error: whereOffers está vacío. Abortando.");
         return []; 
     }
     
-    const finalWhere = `CodigoEmpresa=1 and (${whereOffers})`; 
+    const finalWhere = `CodigoEmpresa=1 and (${whereOffers})`;
     const ruta = '/adArticulosCatalogo/query';
     console.log(`[DantiaService-V2] Usando cláusula WHERE: ${finalWhere}`);
 
-    // 2. Bucle para pedir páginas (con límite de seguridad)
+    // 2. Bucle para pedir páginas
     while (hasNextPage) {
-      // Comprobación de seguridad
       if (currentPage > MAX_PAGES_TO_FETCH) {
-          console.warn(`[DantiaService-V2] Se alcanzó el límite de seguridad (${MAX_PAGES_TO_FETCH} páginas). Deteniendo descarga.`);
+          console.warn(`[DantiaService-V2] Se alcanzó el límite de ${MAX_PAGES_TO_FETCH} páginas. Deteniendo.`);
           hasNextPage = false;
           continue;
       }
 
       try {
-        // *** USAR 'page' y 'count' para Dantia ***
-        const queryParams = {
-          count: PAGE_LIMIT,
-          page: currentPage, // Usar el número de página actual
-          where: finalWhere
-        };
-
+        const queryParams = { count: PAGE_LIMIT, page: currentPage, where: finalWhere };
         console.log(`[DantiaService-V2] Pidiendo página ${currentPage}... Params: ${JSON.stringify({count: queryParams.count, page: queryParams.page})}`);
 
         // 3. Llamar a la API de Dantia
-        // Ya no necesitamos el interceptor, porque el token se verificó al inicio.
-        // Si el token expira A MITAD del bucle (improbable si dura 1h y esto tarda <1h),
-        // tendríamos que añadir el interceptor de nuevo, pero por ahora esto es más limpio.
+        // El interceptor se activará aquí y llamará a ensureValidSession
         const response = await apiClient.get<ApiResponse>(ruta, { params: queryParams });
         const rawArticles = response.data.$resources || [];
         totalRawFetched += rawArticles.length;
@@ -86,30 +69,22 @@ export const dantiaService = {
         
         allCleanArticles = allCleanArticles.concat(pageCleanArticles);
 
-        // 5. Comprobar si existen más páginas
+        // 5. Comprobar si hay más páginas
         hasNextPage = rawArticles.length === PAGE_LIMIT; 
-        
-        if (hasNextPage) {
-            currentPage++;
-        } else {
-            console.log(`[DantiaService-V2] Última página recibida (${rawArticles.length} artículos). La descarga debería estar completa.`);
-        }
+        if (hasNextPage) currentPage++;
+        else console.log(`[DantiaService-V2] Última página recibida (${rawArticles.length} artículos).`);
         
       } catch (error: any) {
-        console.error(`[DantiaService-V2] Error pidiendo página ${currentPage}. Abortando sincronización.`, error.message);
-        // Si el error es 401/403 (Token Inválido), forzamos un re-login para la próxima vez
-        if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) {
-            console.error('[DantiaService-V2] Error de autenticación. Se forzará re-login en la próxima ejecución.');
-            // (El auth.service se encargará de esto automáticamente la próxima vez que se llame ensureValidSession)
-        }
+        console.error(`[DantiaService-V2] Error pidiendo página ${currentPage}. Abortando.`, error.message);
+        if (axios.isAxiosError(error)) console.error('[DantiaService-V2] Detalle error Dantia:', error.response?.data);
         hasNextPage = false;
-        allCleanArticles = []; 
+        allCleanArticles = [];
       }
     } // Fin while
 
-    console.log(`[DantiaService-V2] Descarga finalizada. Total artículos limpios obtenidos: ${allCleanArticles.length}`);
+    console.log(`[DantiaService-V2] Descarga finalizada. Total artículos limpios: ${allCleanArticles.length}`);
     if (allCleanArticles.length === MAX_PAGES_TO_FETCH * PAGE_LIMIT) {
-        console.warn(`[DantiaService-V2] ADVERTENCIA: Se alcanzó el límite máximo de páginas. Los datos podrían estar incompletos.`);
+        console.warn(`[DantiaService-V2] ADVERTENCIA: Se alcanzó el límite máximo de páginas.`);
     }
     return allCleanArticles;
   }
