@@ -1,11 +1,7 @@
-// src/services/auth.service.ts
-
 import axios from 'axios';
 import 'dotenv/config';
-// Asegúrate de que esta importación sea correcta según tu instalación
-import { wrapper as axiosCookiejarSupport } from 'axios-cookiejar-support'; 
-// Importamos el cookieJar compartido desde apiClient
-import { cookieJar } from './apiClient'; 
+import { wrapper as axiosCookiejarSupport } from 'axios-cookiejar-support';
+import { cookieJar } from '../cookieJar'; // <-- ¡CAMBIO IMPORTANTE! Importa desde el nuevo archivo
 
 // Interfaz para la respuesta esperada del login de Dantia
 interface LoginResponse {
@@ -21,9 +17,7 @@ let sessionCache = {
 
 /**
  * Realiza el proceso de login contra la API de Dantia.
- * Guarda la cookie en el cookieJar compartido.
- * Guarda el accessToken y su expiración en sessionCache.
- * @returns {Promise<string>} El accessToken obtenido.
+ * Esta función es INTERNA y es llamada por ensureValidSession.
  */
 async function login(): Promise<string> {
   try {
@@ -31,59 +25,49 @@ async function login(): Promise<string> {
     
     // Verifica que la URL base esté definida en .env
     const baseURL = process.env.THIRD_PARTY_API_URL;
-    if (!baseURL || baseURL.trim() === '') { // Comprueba también que no esté vacía
+    if (!baseURL || baseURL.trim() === '') {
         throw new Error('La variable de entorno THIRD_PARTY_API_URL no está definida o está vacía en .env');
     }
-    // *** Log de Depuración ***
     console.log(`[AuthService DEBUG] Usando baseURL para autenticación: ${baseURL}`); 
-    // *** Fin Log ***
 
-    // Cliente Axios temporal SOLO para el login (evita bucles de interceptor)
+    // Cliente Axios temporal SOLO para el login
     const authClient = axios.create({
-      baseURL: baseURL, // Usa la URL base verificada
-      withCredentials: true, // Importante para manejar cookies
+      baseURL: baseURL,
+      withCredentials: true,
     });
-    // Aplica el soporte de cookies usando el MISMO cookieJar que apiClient
     axiosCookiejarSupport(authClient);
-    authClient.defaults.jar = cookieJar; 
+    authClient.defaults.jar = cookieJar; // Usa el cookieJar compartido
 
-    // Credenciales desde .env
     const loginParams = {
       name: process.env.THIRD_PARTY_USERNAME,
       password: process.env.THIRD_PARTY_PASSWORD,
     };
     
-    // Endpoint específico para el login
     const loginEndpoint = '/autentificar'; 
 
-    // *** Logs de Depuración Detallados ***
-    // Construye la URL completa aproximada solo para mostrarla en el log
-    const fullLoginURL = `${baseURL}${loginEndpoint}?name=${loginParams.name}&password=${loginParams.password}`; // Axios manejará la codificación
-    console.log(`[AuthService DEBUG] Intentando GET a (URL aproximada): ${fullLoginURL}`); 
+    console.log(`[AuthService DEBUG] Intentando GET a (URL aproximada): ${baseURL}${loginEndpoint}?name=${loginParams.name}&password=${loginParams.password}`); 
     console.log(`[AuthService DEBUG] Parámetros reales para Axios: ${JSON.stringify(loginParams)}`); 
-    // *** Fin Logs Detallados ***
 
-    // Hacemos la petición GET al endpoint de login con los parámetros
+    // Hacemos la petición GET al endpoint de login
     const response = await authClient.get<LoginResponse>(loginEndpoint, { 
       params: loginParams 
     });
 
-    // *** Logs de Depuración de la Respuesta ***
     console.log(`[AuthService DEBUG] Respuesta Login Raw: ${JSON.stringify(response.data)}`);
     const { token, expiresIn } = response.data;
+
+    let effectiveExpiresIn = expiresIn;
+
     // Verifica que expiresIn sea un número válido
     if (typeof expiresIn !== 'number' || expiresIn <= 0) {
-        console.warn(`[AuthService WARN] 'expiresIn' recibido no es un número válido o es <= 0: ${expiresIn}. Usando 3600s por defecto.`);
-        // Asigna un valor por defecto si expiresIn es inválido, ej. 1 hora
-        const defaultExpiresIn = 3600; 
-        sessionCache.expiresAt = Date.now() + (defaultExpiresIn - 60) * 1000; // Usa el valor por defecto
+        console.warn(`[AuthService WARN] 'expiresIn' recibido no es un número válido: ${expiresIn}. Usando 3600s por defecto.`);
+        effectiveExpiresIn = 3600; // Asigna 1 hora por defecto
     } else {
         console.log(`[AuthService DEBUG] expiresIn recibido: ${expiresIn} (tipo: ${typeof expiresIn})`);
-        const marginSeconds = 60; // Margen de seguridad
-        // Calcula la expiración en milisegundos desde epoch
-        sessionCache.expiresAt = Date.now() + (expiresIn - marginSeconds) * 1000;
     }
-    // *** Fin Logs ***
+
+    const marginSeconds = 60; // Margen de seguridad
+    sessionCache.expiresAt = Date.now() + (effectiveExpiresIn - marginSeconds) * 1000;
 
     // Verifica que el token exista
     if (!token) {
@@ -91,11 +75,9 @@ async function login(): Promise<string> {
     }
     sessionCache.accessToken = token;
 
-    // *** Log de Depuración de la Expiración Calculada ***
     const expiryDate = new Date(sessionCache.expiresAt);
-    const calculatedDuration = sessionCache.expiresAt > 0 ? ((sessionCache.expiresAt - Date.now()) / 1000).toFixed(0) : 'N/A';
+    const calculatedDuration = ((sessionCache.expiresAt - Date.now()) / 1000).toFixed(0);
     console.log(`[AuthService DEBUG] Token guardado. Válido hasta (estimado): ${expiryDate.toISOString()} (aprox. ${calculatedDuration} segundos restantes)`);
-    // *** Fin Log ***
 
     console.log('[AuthService] Login exitoso.');
     return token; // Devuelve el token obtenido
@@ -105,50 +87,41 @@ async function login(): Promise<string> {
     if (axios.isAxiosError(error)) {
         console.error('[AuthService] Error Axios al hacer login:', {
             message: error.message,
-            url: error.config?.url, // La URL relativa que intentó usar
-            baseURL: error.config?.baseURL, // La URL base configurada
+            url: error.config?.url,
+            baseURL: error.config?.baseURL,
             method: error.config?.method,
-            code: error.code, // Código de error (ej. ENOTFOUND, ECONNREFUSED)
-            status: error.response?.status // Código HTTP si hubo respuesta
+            code: error.code,
+            status: error.response?.status
         });
-        // Si el error es específico de URL inválida
-        if (error.message.includes('Invalid URL') || error.code === 'ERR_INVALID_URL') {
-            console.error('[AuthService] -> Causa probable: La URL base o el endpoint son incorrectos. Verifica THIRD_PARTY_API_URL en .env y el path "/autentificar".');
-        }
     } else {
-        // Error genérico (ej. problema con .env, error de código)
         console.error('[AuthService] Error Genérico al hacer login:', error.message);
     }
-    // Resetea la caché en caso de error
     sessionCache.accessToken = null;
     sessionCache.expiresAt = 0; 
-    // Lanza un error claro para que el proceso que llamó (el worker) sepa que falló
     throw new Error(`No se pudo autenticar con Dantia: ${error.message}`); 
   }
 }
 
 /**
- * Función pública usada por el interceptor de apiClient.
- * Asegura que haya un token válido en sessionCache, refrescándolo (llamando a login) si es necesario.
+ * Función pública usada por el worker (dantia.service).
+ * Asegura que haya un token válido en sessionCache, refrescándolo si es necesario.
+ * ESTA FUNCIÓN SÍ SE EXPORTA.
  * @returns {Promise<string>} El accessToken válido.
  */
 export async function ensureValidSession(): Promise<string> {
   const now = Date.now();
   const expiresAt = sessionCache.expiresAt;
-  // Considera el token válido si existe Y su tiempo de expiración es mayor que el tiempo actual
   const isValid = !!sessionCache.accessToken && expiresAt > now;
 
-  // *** Log de Depuración de la Comprobación ***
   const nowISO = new Date(now).toISOString();
-  const expiresAtISO = expiresAt > 0 ? new Date(expiresAt).toISOString() : 'N/A'; // Muestra N/A si nunca se ha logueado
+  const expiresAtISO = expiresAt > 0 ? new Date(expiresAt).toISOString() : 'N/A';
   console.log(`[AuthService Check] Ahora: ${nowISO}, Token Expira: ${expiresAtISO}, ¿Válido?: ${isValid}`);
-  // *** Fin Log ***
 
   if (isValid) {
-    return sessionCache.accessToken!; // Sabemos que no es null si isValid es true
+    return sessionCache.accessToken!; // Devuelve el token cacheado
   }
 
   // Si no es válido (null, undefined o expirado)
   console.log('[AuthService] Token no válido o expirado. Refrescando sesión...');
-  return await login(); // Llama a la función de login para obtener uno nuevo
+  return await login(); // Llama a la función interna login
 }

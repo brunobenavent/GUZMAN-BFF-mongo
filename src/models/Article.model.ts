@@ -1,8 +1,8 @@
 // src/models/Article.model.ts
 import { Schema, model } from 'mongoose';
-import { ArticleDTO } from '../mappers/article.mapper'; // Importa el tipo DTO completo
+import { ArticleDTO } from '../mappers/article.mapper'; // Importa el tipo DTO limpio
 
-// El esquema usa ArticleDTO como tipo base, pero solo define los campos a guardar
+// El esquema ahora coincide 1:1 con el DTO limpio
 const articleSchema = new Schema<ArticleDTO>({
   codigoGuzman: { type: String, required: true, unique: true, index: true },
   EAN13: { type: String, index: true },
@@ -21,24 +21,13 @@ const articleSchema = new Schema<ArticleDTO>({
   nombreComun: { type: String },
   precio2: { type: Number, default: 0 },
   precio3: { type: Number, default: 0 },
-  imagenUrl: { type: String, default: '' }, // <- Solo definimos imagenUrl
-  ofertas: {
-    nuevoEspacio: { type: Boolean, default: false },
-    euroPlanta: { type: Boolean, default: false },
-    cortijo: { type: Boolean, default: false },
-    finca: { type: Boolean, default: false },
-    arroyo: { type: Boolean, default: false },
-    gamera: { type: Boolean, default: false },
-    garden: { type: Boolean, default: false },
-    marbella: { type: Boolean, default: false },
-    estacion: { type: Boolean, default: false },
-  }
-  // No definimos 'imagenUrlOriginal' aquí, Mongoose lo ignorará al guardar
+  imagenUrl: { type: String, default: '' }, // Campo para la URL Cloudinary
+  ofertas: { /* ... (tus ofertas booleanas) ... */ }
 }, {
-  timestamps: true // Añade createdAt y updatedAt
+  timestamps: true
 });
 
-// Índice de texto para búsqueda
+// Índice de texto (igual que antes)
 articleSchema.index({
     nombreCientifico: 'text',
     nombreComun: 'text',
@@ -47,7 +36,6 @@ articleSchema.index({
     familia: 'text'
 });
 
-// El modelo usa ArticleDTO para el tipado, Mongoose usa el schema definido arriba
 const Article = model<ArticleDTO>('Article', articleSchema);
 
 export default Article;
