@@ -42,7 +42,7 @@ const startServer = async () => {
 
     // --- 2. 'app' y 'PORT' se usan aquí ---
     app.listen(PORT, () => {
-      console.log(`[BFF] Servidor V2 (MongoDB) corriendo en http://localhost:${PORT}`);
+      console.log(`[BFF] Servidor V2 (MongoDB) corriendo en ${process.env.BACKEND_URL}:${PORT}`);
     });
     
   } catch (error) {

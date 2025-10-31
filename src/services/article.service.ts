@@ -13,72 +13,118 @@ export interface PaginatedArticlesResponse {
   articles: ArticleDTO[];
 }
 
-// Exporta el objeto que contiene TODAS las funciones
+// Interfaz para los filtros que aceptamos (para mejor tipado)
+interface ArticleFilters {
+  search?: string;
+  maceta?: string;
+  altura?: string;
+  calibre?: string;
+  familia?: string; // Añadido para claridad
+  ofertaCortijo?: 'true' | 'false';
+  // ... añadir otros filtros aquí
+}
+
 export const articleService = {
 
   /**
    * 1. OBTENER TODOS (con paginación y filtros)
+   * Obtiene artículos paginados y filtrados desde la base de datos MongoDB.
+   * Utiliza $regex para búsqueda parcial (searchQuery) Y filtros exactos (filters).
    */
   getAllArticles: async (
     page: number,
     limit: number,
     searchQuery?: string,
-    filters: any = {},
-    userPayload?: JwtPayload // Acepta el usuario opcional
+    filters: ArticleFilters = {}, // Usamos la interfaz de filtros
+    userPayload?: JwtPayload // Acepta el usuario opcional para precios
   ): Promise<PaginatedArticlesResponse> => {
 
-    console.log(`[Service] Buscando en Mongo: page=${page}, limit=${limit}, userRole=${userPayload?.role || 'anonimo'}`);
+    console.log(`[Service] Buscando en Mongo: page=${page}, limit=${limit}, userRole=${userPayload?.role || 'anonimo'}, searchQuery=${searchQuery}, filters=${JSON.stringify(filters)}`);
+
     const skip = (page - 1) * limit;
     console.log(`[Service] Calculado para Mongo: skip=${skip}, limit=${limit}`);
 
-    // Lógica de Proyección de Precios
-    let projection = {};
+    // --- Lógica de Proyección de Precios ---
+    let projection = {}; // Por defecto, Mongoose devuelve todo
     if (!userPayload) {
-      projection = { PVP: 0, precio2: 0, precio3: 0 }; // Oculta precios si es anónimo
+      // Si NO hay usuario (anónimo), OCULTA los precios
+      projection = {
+        PVP: 0,
+        precio2: 0,
+        precio3: 0
+      };
       console.log('[Service] Usuario anónimo. Ocultando precios.');
     } else {
       console.log(`[Service] Usuario autenticado (${userPayload.role}). Mostrando todos los precios.`);
     }
+    // --- Fin Lógica de Proyección ---
 
-    // Lógica de Query
+    // --- Lógica de Consulta (CORREGIDA) ---
+    // 'mongoQuery' contendrá todas las condiciones (que se aplican con AND)
     let mongoQuery: any = {};
+
+    // 1. Añadir BÚSQUEDA ($regex) si existe 'searchQuery'
     if (searchQuery) {
       const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const safeSearchQuery = escapeRegExp(searchQuery);
-      const regex = new RegExp(safeSearchQuery, 'i');
+      const regex = new RegExp(safeSearchQuery, 'i'); // 'i' = insensible a mayúsculas
+
+      // Busca el fragmento en CUALQUIERA de estos campos
       mongoQuery.$or = [
         { nombreCientifico: { $regex: regex } },
         { nombreComun: { $regex: regex } },
         { codigoGuzman: { $regex: regex } },
-        { EAN13: { $regex: regex } },
-        { familia: { $regex: regex } }
+        { EAN13: { $regex: regex } }
+        // Nota: 'familia' se saca de aquí para que sea un AND
       ];
+      console.log(`[Service] Buscando FRAGMENTO (regex): /${safeSearchQuery}/i`);
     }
-    if (filters.maceta) mongoQuery.maceta = filters.maceta;
-    if (filters.altura) mongoQuery.altura = filters.altura;
-    if (filters.calibre) mongoQuery.calibre = filters.calibre;
-    if (filters.ofertaCortijo === 'true') mongoQuery['ofertas.cortijo'] = true;
-    console.log(`[Service] Query Mongo final: ${JSON.stringify(mongoQuery)}`);
+
+    // 2. Añadir FILTROS EXACTOS (como 'familia', 'altura', etc.)
+    // Mongoose/Mongo unirá estas condiciones con la de $or usando AND
+    if (filters.familia) {
+      mongoQuery.familia = filters.familia;
+    }
+    if (filters.maceta) {
+      mongoQuery.maceta = filters.maceta;
+    }
+    if (filters.altura) {
+      mongoQuery.altura = filters.altura;
+    }
+    if (filters.calibre) {
+      mongoQuery.calibre = filters.calibre;
+    }
+    if (filters.ofertaCortijo === 'true') {
+      mongoQuery['ofertas.cortijo'] = true;
+    }
+    // ... añade más 'if' para otros filtros aquí ...
+
+    // --- Fin Lógica de Consulta ---
+
+    console.log(`[Service] Query Mongo final (combinada): ${JSON.stringify(mongoQuery)}`);
 
     try {
+      // Ejecutar dos consultas a MongoDB en paralelo
       const [articles, totalArticles] = await Promise.all([
-        Article.find(mongoQuery)
-          .select(projection) // Aplica la proyección de precios
+        Article.find(mongoQuery) // find() aplica todas las condiciones AND
+          .select(projection)    // Aplica la proyección de precios
           .limit(limit)
           .skip(skip)
-          .sort({ nombreCientifico: 1 })
-          .lean(),
-        Article.countDocuments(mongoQuery)
+          .sort({ nombreCientifico: 1 }) // Ordena
+          .lean(), // Devuelve objetos JS planos
+        Article.countDocuments(mongoQuery) // Obtiene el conteo total con la misma query
       ]);
 
       console.log(`[Service] Mongo devolvió ${articles.length} artículos. Total coincidente: ${totalArticles}`);
       const totalPages = Math.ceil(totalArticles / limit);
+
       return {
         currentPage: page,
         totalPages: totalPages,
         totalArticles: totalArticles,
         articles: articles as ArticleDTO[],
       };
+
     } catch (error: any) {
         console.error('[Service] Error al consultar MongoDB:', error);
         throw new Error('Error al obtener artículos de la base de datos.');
@@ -87,13 +133,14 @@ export const articleService = {
 
   /**
    * 2. OBTENER UNO POR CÓDIGO
+   * Obtiene un artículo. Oculta precios si el usuario es anónimo.
    */
   getArticleByCodigo: async (
-    codigo: string,
+    codigo: string, 
     userPayload?: JwtPayload // Acepta el usuario opcional
   ): Promise<ArticleDTO> => {
     try {
-      // Lógica de Proyección
+      // Lógica de Proyección de Precios
       let projection = {};
       if (!userPayload) {
         projection = { PVP: 0, precio2: 0, precio3: 0 }; // Oculta precios
@@ -119,6 +166,7 @@ export const articleService = {
 
   /**
    * 3. ACTUALIZAR IMAGEN (PUT .../imagen)
+   * Sube/Actualiza la imagen de un artículo en Cloudinary y MongoDB.
    */
   updateArticleImage: async (codigoGuzman: string, imageBuffer: Buffer, originalFilename: string): Promise<ArticleDTO> => {
     const existingArticle = await Article.findOne({ codigoGuzman: codigoGuzman });
@@ -126,7 +174,7 @@ export const articleService = {
       throw new Error(`Artículo con código ${codigoGuzman} no encontrado.`);
     }
     try {
-        const imageMimeType = 'image/jpeg'; // Asunción
+        const imageMimeType = 'image/jpeg'; // Asunción simple
         const base64Image = imageBuffer.toString('base64');
         const dataUri = `data:${imageMimeType};base64,${base64Image}`;
 
@@ -164,24 +212,29 @@ export const articleService = {
 
   /**
    * 4. ACTUALIZAR DATOS (PUT .../:codigoGuzman)
+   * Modifica datos de texto/número de un artículo
    */
   updateArticle: async (codigoGuzman: string, updateData: Partial<ArticleDTO>): Promise<ArticleDTO> => {
     try {
+      // Seguridad: No permitir cambiar el ID o la URL de imagen por esta vía
       if ((updateData as any).codigoGuzman) delete (updateData as any).codigoGuzman;
       if ((updateData as any).imagenUrl) delete (updateData as any).imagenUrl;
+
       console.log(`[Service] Actualizando artículo ${codigoGuzman} con datos: ${JSON.stringify(updateData)}`);
 
       const updatedArticle = await Article.findOneAndUpdate(
         { codigoGuzman: codigoGuzman },
         { $set: updateData },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true } // Devuelve doc actualizado y corre validadores
       ).lean(); 
 
       if (!updatedArticle) {
         throw new Error(`Artículo con código ${codigoGuzman} no encontrado.`);
       }
+
       console.log(`[Service] Artículo ${codigoGuzman} actualizado en MongoDB.`);
       return updatedArticle as ArticleDTO;
+
     } catch (error: any) {
       console.error(`[Service] Error en updateArticle para ${codigoGuzman}:`, error);
       if (error.name === 'ValidationError') {
